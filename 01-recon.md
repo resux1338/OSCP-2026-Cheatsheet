@@ -19,6 +19,7 @@ sudo nmap -sU --top-ports 100 -oN nmap/udp.txt $IP
 nmap -p$ports --script vuln -oN nmap/vuln.txt $IP
 ```
 - `-sCV` = default scripts + version. `-Pn` skips host discovery (exam boxes block ping). `--min-rate` keeps it moving.
+- **Tuning gotchas:** `-A` already implies `-sC -sV` (so `-sCV -A` is redundant — pick one). `--min-rate 5000` is fine for fast discovery but on a flaky exam/lab VPN aggressive rates cause **packet loss → silently missed open ports** — if a box feels "empty," re-run the full sweep at `--min-rate 1500` before assuming. Robust port parse: `ports=$(grep -oP '^\d+(?=/tcp\s+open)' nmap/allports.txt | paste -sd,)`.
 - Automation (enumeration only, exam-safe): **AutoRecon** / nmapAutomator fan out per-service enum for you — fine to run since they enumerate, not auto-exploit. Still read everything yourself.
 - Always note the **OS hint, hostname, domain name** (add to `/etc/hosts`).
 
@@ -100,6 +101,7 @@ nxc mssql $IP -u sa -p pass -x "whoami"
 xfreerdp /u:user /p:pass /v:$IP /cert:ignore +clipboard /dynamic-resolution
 nxc rdp $IP -u user -p pass
 ```
+> **RDP black screen / `BIO_read returned a system error 110` over the lab VPN?** Not a codec bug — it's an MTU/PMTU blackhole: small auth packets pass, large bitmap frames get silently dropped. Fix once: `sudo ip link set dev tun0 mtu 1350` (1350 works for both HTB and OffSec VPNs). Make it persistent with an OpenVPN `--up` script if it recurs.
 **5432 Postgres** — `psql -h $IP -U postgres`; `COPY ... FROM PROGRAM` RCE; read backups (Slonik pattern).
 **5985/5986 WinRM**
 ```bash

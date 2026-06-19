@@ -130,7 +130,7 @@ evil-winrm -i IP -u user -H NThash
 HackTricks (book.hacktricks.xyz), GTFOBins, LOLBAS, PayloadsAllTheThings, revshells.com cheats,
 hashcat mode table, Impacket/nxc help dumps, your own per-box notes. Keep binaries staged:
 linpeas, winPEASany, pspy64, chisel (lin+win), ligolo (proxy+agent), PrintSpoofer64, GodPotato,
-JuicyPotatoNG, PowerView, SharpHound, mimikatz, PwnKit.
+JuicyPotatoNG, PowerView, SharpHound, mimikatz, PwnKit, bloodyAD (sealed LDAP / ACL abuse).
 
 ---
 

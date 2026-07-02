@@ -20,7 +20,7 @@ nmap -p$ports --script vuln -oN nmap/vuln.txt $IP
 ```
 - `-sCV` = default scripts + version. `-Pn` skips host discovery (exam boxes block ping). `--min-rate` keeps it moving.
 - **Tuning gotchas:** `-A` already implies `-sC -sV` (so `-sCV -A` is redundant — pick one). `--min-rate 5000` is fine for fast discovery but on a flaky exam/lab VPN aggressive rates cause **packet loss → silently missed open ports** — if a box feels "empty," re-run the full sweep at `--min-rate 1500` before assuming. Robust port parse: `ports=$(grep -oP '^\d+(?=/tcp\s+open)' nmap/allports.txt | paste -sd,)`.
-- Automation (enumeration only, exam-safe): **AutoRecon** / nmapAutomator fan out per-service enum for you — fine to run since they enumerate, not auto-exploit. Still read everything yourself.
+- **AutoRecon** / nmapAutomator fan out per-service enum (enumeration only, so exam-safe). Read the output yourself.
 - Always note the **OS hint, hostname, domain name** (add to `/etc/hosts`).
 
 ### /etc/hosts — do this for EVERY web/AD box

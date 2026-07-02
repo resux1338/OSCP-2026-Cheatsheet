@@ -2,7 +2,7 @@
 
 [**The Compendium for this repo**](https://mystichackers.com/story/Njk)
 
-A working penetration-testing reference structured around the **2026 OSCP+ exam**: 3 standalone machines (20 pts each = 60) + one Active Directory set of 3 machines (40 pts) — **70 to pass**. No buffer-overflow machine, no bonus points.
+Penetration-testing reference for the **2026 OSCP+ exam**: 3 standalone machines (20 pts each = 60) + one Active Directory set of 3 machines (40 pts) — **70 to pass**. No buffer-overflow machine, no bonus points.
 
 **How to use it.** Each file below is a self-contained phase of the attack — open the one you need and `Ctrl+F` the keyword (a port like `445`, a technique like `kerberoast`, a tool like `chisel`). During the exam, **clone this repo locally first** (`git clone`) and/or keep an offline copy so you're never depending on the network staying up for 24h. Remember: AI assistants are **not** permitted during the exam or report phase — this is offline notes.
 
@@ -130,11 +130,13 @@ evil-winrm -i IP -u user -H NThash
 HackTricks (book.hacktricks.xyz), GTFOBins, LOLBAS, PayloadsAllTheThings, revshells.com cheats,
 hashcat mode table, Impacket/nxc help dumps, your own per-box notes. Keep binaries staged:
 linpeas, winPEASany, pspy64, chisel (lin+win), ligolo (proxy+agent), PrintSpoofer64, GodPotato,
-JuicyPotatoNG, PowerView, SharpHound, mimikatz, PwnKit, bloodyAD (sealed LDAP / ACL abuse).
+JuicyPotatoNG, PowerView, SharpHound, mimikatz, PwnKit, bloodyAD (sealed LDAP / ACL abuse),
+certipy-ad (ADCS ESC1/ESC8), RunasCs (run-as with creds), Invoke-ConPtyShell (interactive Win TTY),
+impacket owneredit/dacledit (WriteOwner/WriteDACL abuse).
 
 ---
 
-*Built as a personal prep reference. Source: general pentest methodology + technique knowledge, cross-checked for coverage gaps against public OSCP checklists (crtvrffnrt/OSCP-Checklist-Cheatsheet2024, BlessedRebuS/OSCP-Pentesting-Cheatsheet, fatalxs/oscp-cheatsheet) and HackTricks/GTFOBins/PayloadsAllTheThings, and verified against the official OSCP+ exam rules (2026). All commands written fresh — not copied from any cert-lab/PG box walkthrough. AI tools are not permitted during the live exam or report phase — this file is offline notes.*
+*Personal prep notes. Coverage cross-checked against public OSCP checklists (crtvrffnrt, BlessedRebuS, fatalxs), HackTricks, GTFOBins and PayloadsAllTheThings, plus the official OSCP+ 2026 exam rules.*
 
 ---
 

